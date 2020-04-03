@@ -180,6 +180,7 @@
                     <!-- Keep's stream data in memory -->
                     <parameter name="mode" value="memory"/>
                 </trigger>
+
             </triggers>
         </startup>
 

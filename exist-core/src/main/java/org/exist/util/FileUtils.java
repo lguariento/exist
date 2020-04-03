@@ -532,5 +532,36 @@ public class FileUtils {
 			
 			return entryName.startsWith(prefix) && entryName.endsWith(suffix);
 		};
-	}    
+	}
+
+    /**
+     * Provides a humane string describing the number of bytes.
+     *
+     * @param bytes the number of bytes
+     * @return the humane string
+     */
+    public static String humanSize(final long bytes) {
+        if (bytes < 1024L) {
+            return bytes + " bytes";
+        } else if (bytes < 1024L * 1024L) {
+            return Math.round(bytes / 1024) + " KB";
+        } else if (bytes < 1024L * 1024L * 1024L) {
+            return Math.round(bytes / (1024L * 1024L)) + " MB";
+        } else if (bytes < 1024L * 1024L * 1024L * 1024L) {
+            return Math.round(bytes / (1024L * 1024L * 1024L)) + " GB";
+        } else {
+            return bytes + " bytes";
+        }
+    }
+
+    /**
+     * Replaces any Windows path separators with Unix path separators.
+     *
+     * @param pathString a path string
+     *
+     * @return the updated path string
+     */
+    public static String withUnixSep(final String pathString) {
+        return pathString.replace('\\', '/');
+    }
 }

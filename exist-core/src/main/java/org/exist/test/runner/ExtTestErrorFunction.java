@@ -30,6 +30,11 @@ import org.junit.runner.Description;
 import org.junit.runner.notification.Failure;
 import org.junit.runner.notification.RunNotifier;
 
+import javax.annotation.Nullable;
+import java.util.Arrays;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static org.exist.xquery.FunctionDSL.optParam;
 import static org.exist.xquery.FunctionDSL.param;
 import static org.exist.xquery.FunctionDSL.params;
@@ -99,6 +104,56 @@ public class ExtTestErrorFunction extends JUnitIntegrationFunction {
             columnNumber = -1;
         }
 
-        return new XPathException(lineNumber, columnNumber, errorCode, description);
+        final XPathException xpe = new XPathException(lineNumber, columnNumber, errorCode, description);
+
+        final Sequence seqJavaStackTrace = errorMap.get(new StringValue("java-stack-trace"));
+        if (seqJavaStackTrace != null && !seqJavaStackTrace.isEmpty()) {
+            try {
+                xpe.setStackTrace(convertStackTraceElements(seqJavaStackTrace));
+            } catch (final NullPointerException e) {
+                e.printStackTrace();
+            }
+        }
+
+        return xpe;
+    }
+
+    private static final Pattern PTN_CAUSED_BY = Pattern.compile("Caused by:\\s([a-zA-Z0-9_$\\.]+)(?::\\s(.+))?");
+    private static final Pattern PTN_AT = Pattern.compile("at\\s((?:[a-zA-Z0-9_$]+)(?:\\.[a-zA-Z0-9_$]+)*)\\.([a-zA-Z0-9_$-]+)\\(([a-zA-Z0-9_]+\\.java):([0-9]+)\\)");
+
+    protected StackTraceElement[] convertStackTraceElements(final Sequence seqJavaStackTrace) throws XPathException {
+        StackTraceElement[] traceElements = new StackTraceElement[seqJavaStackTrace.getItemCount() - 1];
+
+        final Matcher matcherAt = PTN_AT.matcher("");
+
+        // index 0 is the first `Caused by: ...`
+        int i = 1;
+        for ( ; i < seqJavaStackTrace.getItemCount(); i++) {
+            final String item = seqJavaStackTrace.itemAt(i).getStringValue();
+            final StackTraceElement stackTraceElement = convertStackTraceElement(matcherAt, item);
+            if (stackTraceElement == null) {
+                break;
+            }
+            traceElements[i - 1] = stackTraceElement;
+        }
+
+        if (i + 1 < seqJavaStackTrace.getItemCount()) {
+            traceElements = Arrays.copyOf(traceElements, i);
+        }
+
+        return traceElements;
+    }
+
+    private @Nullable StackTraceElement convertStackTraceElement(final Matcher matcherAt, final String s) {
+        matcherAt.reset(s);
+        if (matcherAt.matches()) {
+            final String declaringClass = matcherAt.group(1);
+            final String methodName = matcherAt.group(2);
+            final String fileName = matcherAt.group(3);
+            final String lineNumber = matcherAt.group(4);
+            return new StackTraceElement(declaringClass, methodName, fileName, Integer.valueOf(lineNumber));
+        } else {
+            return null;
+        }
     }
 }

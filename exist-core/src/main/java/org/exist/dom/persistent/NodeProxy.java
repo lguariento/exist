@@ -661,15 +661,6 @@ public class NodeProxy implements NodeSet, NodeValue, NodeHandle, DocumentSet, C
         return "";
     }
 
-    public String getNodeValueSeparated() {
-        try(final DBBroker broker = doc.getBrokerPool().getBroker()) {
-            return broker.getNodeValue(asStoredNode(), true);
-        } catch(final EXistException e) {
-            //TODO : raise an exception here !
-        }
-        return "";
-    }
-
     //TODO this should be improved. Consider an interface that contains just the
     // getters from INodeHandle and persistent.NodeHandle
     public StoredNode asStoredNode() {
@@ -1273,7 +1264,7 @@ public class NodeProxy implements NodeSet, NodeValue, NodeHandle, DocumentSet, C
     @Override
     public String toString() {
         if(nodeId == NodeId.DOCUMENT_NODE) {
-            return "Document node for " + doc.getDocId();
+            return "Document node proxy (docId=" + doc.getDocId() + ")";
         } else {
             return doc.getNode(nodeId).getNodeName();
         }

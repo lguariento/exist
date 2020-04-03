@@ -435,7 +435,7 @@ public class LuceneIndexWorker implements OrderedValuesIndex, QNamedKeysIndex {
             for (QName qname : definedIndexes) {
                 String field = LuceneUtil.encodeQName(qname, index.getBrokerPool().getSymbols());
                 LuceneConfig config = getLuceneConfig(broker, docs);
-                Analyzer analyzer = getAnalyzer(config,null, qname);
+                Analyzer analyzer = getQueryAnalyzer(config,null, qname, options);
                 Query query;
                 if (queryStr == null) {
                     query = new ConstantScoreQuery(new FieldValueFilter(field));
@@ -485,7 +485,7 @@ public class LuceneIndexWorker implements OrderedValuesIndex, QNamedKeysIndex {
             for (QName qname : definedIndexes) {
                 String field = LuceneUtil.encodeQName(qname, index.getBrokerPool().getSymbols());
                 LuceneConfig config = getLuceneConfig(broker, docs);
-                analyzer = getAnalyzer(config, null, qname);
+                analyzer = getQueryAnalyzer(config, null, qname, options);
                 Query query = queryRoot == null ? new ConstantScoreQuery(new FieldValueFilter(field)) : queryTranslator.parse(field, queryRoot, analyzer, options);
                 Optional<Map<String, QueryOptions.FacetQuery>> facets = options.getFacets();
                 if (facets.isPresent() && config != null) {
@@ -507,7 +507,7 @@ public class LuceneIndexWorker implements OrderedValuesIndex, QNamedKeysIndex {
             final NodeSet resultSet = new NewArrayNodeSet();
             final boolean returnAncestor = axis == NodeSet.ANCESTOR;
             final LuceneConfig config = getLuceneConfig(broker, docs);
-            analyzer = getAnalyzer(config, field, null);
+            analyzer = getQueryAnalyzer(config, field, null, options);
             final Query query = queryTranslator.parse(field, queryRoot, analyzer, options);
             if (query != null) {
                 searchAndProcess(contextId, null, docs, contextSet, resultSet,
@@ -572,7 +572,7 @@ public class LuceneIndexWorker implements OrderedValuesIndex, QNamedKeysIndex {
             NodeSet resultSet = new NewArrayNodeSet();
             boolean returnAncestor = axis == NodeSet.ANCESTOR;
             LuceneConfig config = getLuceneConfig(context.getBroker(), docs);
-            Analyzer analyzer = getAnalyzer(config, field, null);
+            Analyzer analyzer = getQueryAnalyzer(config, field, null, options);
             LOG.debug("Using analyzer " + analyzer + " for " + queryString);
             QueryParserWrapper parser = getQueryParser(field, analyzer, docs);
             options.configureParser(parser.getConfiguration());
@@ -684,7 +684,7 @@ public class LuceneIndexWorker implements OrderedValuesIndex, QNamedKeysIndex {
      * @throws XPathException if an error occurs executing the query
      * @throws IOException if an I/O error occurs
      */
-    public NodeImpl search(final List<String> toBeMatchedURIs, String queryText, String[] fieldsToGet, QueryOptions options) throws XPathException, IOException {
+    public NodeImpl search(final XQueryContext context, final List<String> toBeMatchedURIs, String queryText, String[] fieldsToGet, QueryOptions options) throws XPathException, IOException {
 
         return index.withSearcher(searcher -> {
             // Get analyzer : to be retrieved from configuration
@@ -705,23 +705,28 @@ public class LuceneIndexWorker implements OrderedValuesIndex, QNamedKeysIndex {
 
             final PlainTextHighlighter highlighter = new PlainTextHighlighter(query, searcher.searcher.getIndexReader());
 
-            final MemTreeBuilder builder = new MemTreeBuilder();
-            builder.startDocument();
+            context.pushDocumentContext();
+            try {
+                final MemTreeBuilder builder = context.getDocumentBuilder();
+                builder.startDocument();
 
-            // start root element
-            final int nodeNr = builder.startElement("", "results", "results", null);
+                // start root element
+                final int nodeNr = builder.startElement("", "results", "results", null);
 
-            // Perform actual search
-            final BinarySearchCollector collector = new BinarySearchCollector(toBeMatchedURIs, builder, fields, searchAnalyzer, highlighter);
-            searcher.searcher.search(query, collector);
+                // Perform actual search
+                final BinarySearchCollector collector = new BinarySearchCollector(toBeMatchedURIs, builder, fields, searchAnalyzer, highlighter);
+                searcher.searcher.search(query, collector);
 
-            // finish root element
-            builder.endElement();
+                // finish root element
+                builder.endElement();
 
-            //System.out.println(builder.getDocument().toString());
+                //System.out.println(builder.getDocument().toString());
 
-            // TODO check
-            return builder.getDocument().getNode(nodeNr);
+                // TODO check
+                return builder.getDocument().getNode(nodeNr);
+            } finally {
+                context.popDocumentContext();
+            }
 
         });
     }
@@ -1056,10 +1061,17 @@ public class LuceneIndexWorker implements OrderedValuesIndex, QNamedKeysIndex {
      *
      * @return the analyzer or null
      */
-    @Nullable protected Analyzer getAnalyzer(LuceneConfig config, String field, QName qname) {
+    @Nullable protected Analyzer getQueryAnalyzer(LuceneConfig config, String field, QName qname, QueryOptions opts) {
         if (config != null) {
             Analyzer analyzer;
-            if (field == null) {
+            if (opts.getQueryAnalyzerId() != null) {
+                analyzer = config.getAnalyzerById(opts.getQueryAnalyzerId());
+                if (analyzer == null) {
+                    String msg = String.format("getAnalyzerById('%s') returned null!", opts.getQueryAnalyzerId());
+                    LOG.error(msg);
+                }
+            }
+            else if (field == null) {
                 analyzer = config.getAnalyzer(qname);
             } else {
                 analyzer = config.getAnalyzer(field);

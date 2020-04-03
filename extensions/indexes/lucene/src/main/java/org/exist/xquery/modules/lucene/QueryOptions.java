@@ -20,13 +20,12 @@
 
 package org.exist.xquery.modules.lucene;
 
+import io.lacuna.bifurcan.IEntry;
 import org.apache.lucene.facet.DrillDownQuery;
-import org.apache.lucene.facet.FacetsConfig;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.queryparser.classic.QueryParserBase;
 import org.apache.lucene.queryparser.flexible.standard.CommonQueryParserConfiguration;
 import org.apache.lucene.search.MultiTermQuery;
-import org.apache.lucene.search.Query;
 import org.exist.numbering.NodeId;
 import org.exist.stax.ExtendedXMLStreamReader;
 import org.exist.xquery.XPathException;
@@ -53,12 +52,14 @@ public class QueryOptions {
     public static final String OPTION_LOWERCASE_EXPANDED_TERMS = "lowercase-expanded-terms";
     public static final String OPTION_FACETS = "facets";
     public static final String OPTION_FIELDS = "fields";
+    public static final String OPTION_QUERY_ANALYZER_ID = "query-analyzer-id";
 
     protected enum DefaultOperator {
         OR,
         AND
     }
 
+    protected String queryAnalyzerId = null;
     protected DefaultOperator defaultOperator = DefaultOperator.AND;
     protected boolean allowLeadingWildcard = false;
     protected Optional<Integer> phraseSlop = Optional.empty();
@@ -97,30 +98,30 @@ public class QueryOptions {
     }
 
     public QueryOptions(AbstractMapType map) throws XPathException {
-        for (Map.Entry<AtomicValue, Sequence> entry: map) {
-            final String key = entry.getKey().getStringValue();
-            if (key.equals(OPTION_FIELDS) && !entry.getValue().isEmpty()) {
+        for (final IEntry<AtomicValue, Sequence> entry: map) {
+            final String key = entry.key().getStringValue();
+            if (key.equals(OPTION_FIELDS) && !entry.value().isEmpty()) {
                 fields = new HashSet<>();
-                for (SequenceIterator i = entry.getValue().unorderedIterator(); i.hasNext(); ) {
+                for (SequenceIterator i = entry.value().unorderedIterator(); i.hasNext(); ) {
                     fields.add(i.nextItem().getStringValue());
                 }
-            } else if (key.equals(OPTION_FACETS) && entry.getValue().hasOne() && entry.getValue().getItemType() == Type.MAP) {
+            } else if (key.equals(OPTION_FACETS) && entry.value().hasOne() && entry.value().getItemType() == Type.MAP) {
                 // map to hold the facet values for each dimension
                 final Map<String, FacetQuery> tf = new HashMap<>();
                 // iterate over each dimension and collect its values into a FacetQuery
-                for (Map.Entry<AtomicValue, Sequence> facet: (AbstractMapType) entry.getValue().itemAt(0)) {
-                    final Sequence value = facet.getValue();
+                for (final IEntry<AtomicValue, Sequence> facet: (AbstractMapType) entry.value().itemAt(0)) {
+                    final Sequence value = facet.value();
                     FacetQuery values;
                     if (value.hasOne() && value.getItemType() == Type.ARRAY) {
-                        values = new FacetQuery((ArrayType) facet.getValue().itemAt(0));
+                        values = new FacetQuery((ArrayType) facet.value().itemAt(0));
                     } else {
                         values = new FacetQuery(value);
                     }
-                    tf.put(facet.getKey().getStringValue(), values);
+                    tf.put(facet.key().getStringValue(), values);
                 }
                 facets = Optional.of(tf);
             } else {
-                set(key, entry.getValue().getStringValue());
+                set(key, entry.value().getStringValue());
             }
         }
     }
@@ -229,6 +230,8 @@ public class QueryOptions {
             case OPTION_LOWERCASE_EXPANDED_TERMS:
                 lowercaseExpandedTerms = value.equalsIgnoreCase("yes");
                 break;
+            case OPTION_QUERY_ANALYZER_ID:
+                queryAnalyzerId = value;
             default:
                 // unknown option, ignore
                 break;
@@ -259,4 +262,6 @@ public class QueryOptions {
             parser.setLowercaseExpandedTerms(lowercaseExpandedTerms);
         }
     }
+
+    public String  getQueryAnalyzerId() { return queryAnalyzerId; }
 }

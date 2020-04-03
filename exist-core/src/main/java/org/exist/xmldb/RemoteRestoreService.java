@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import static org.exist.util.FileUtils.withUnixSep;
 import static org.exist.xmldb.RemoteCollection.MAX_UPLOAD_CHUNK;
 
 public class RemoteRestoreService implements EXistRestoreService {
@@ -79,18 +80,18 @@ public class RemoteRestoreService implements EXistRestoreService {
         final String remoteFileName;
         final String backupFileName = FileUtils.fileName(backupPath);
         if (backupFileName.endsWith(".zip")) {
-            remoteFileName = uploadBackupFile(backupPath);
+            remoteFileName = uploadBackupFile(backupPath, restoreListener);
         } else if (Files.isDirectory(backupPath)) {
-            final Path tmpZipFile = zipBackupDir(backupPath);
+            final Path tmpZipFile = zipBackupDir(backupPath, restoreListener);
             try {
-                remoteFileName = uploadBackupFile(tmpZipFile);
+                remoteFileName = uploadBackupFile(tmpZipFile, restoreListener);
             } finally {
                 FileUtils.deleteQuietly(tmpZipFile);
             }
         } else if (backupFileName.equals("__contents__.xml")) {
-            final Path tmpZipFile = zipBackupDir(backupPath.getParent());
+            final Path tmpZipFile = zipBackupDir(backupPath.getParent(), restoreListener);
             try {
-                remoteFileName = uploadBackupFile(tmpZipFile);
+                remoteFileName = uploadBackupFile(tmpZipFile, restoreListener);
             } finally {
                 FileUtils.deleteQuietly(tmpZipFile);
             }
@@ -155,6 +156,12 @@ public class RemoteRestoreService implements EXistRestoreService {
                         restoreListener.restoredResource(event.substring(1));
                         break;
 
+                    case SKIP_RESOURCES:
+                        final int sep = event.indexOf('@');
+                        final String strCount = event.substring(1, sep);
+                        final String message = event.substring(sep + 1);
+                        restoreListener.skipResources(message, Long.valueOf(strCount));
+
                     case INFO:
                         restoreListener.info(event.substring(1));
                         break;
@@ -198,10 +205,14 @@ public class RemoteRestoreService implements EXistRestoreService {
         }
     }
 
-    private String uploadBackupFile(final Path backupZipFile) throws XMLDBException {
+    private String uploadBackupFile(final Path backupZipFile, final RestoreServiceTaskListener restoreListener) throws XMLDBException {
         try {
+            final long backupZipFileSize = Files.size(backupZipFile);
+
+            restoreListener.startedTransfer(backupZipFileSize);
+
             String fileName = null;
-            final byte[] chunk = new byte[(int) Math.min(Files.size(backupZipFile), MAX_UPLOAD_CHUNK)];
+            final byte[] chunk = new byte[(int) Math.min(backupZipFileSize, MAX_UPLOAD_CHUNK)];
             try (final InputStream is = Files.newInputStream(backupZipFile)) {
                 int len = -1;
                 while ((len = is.read(chunk)) > -1) {
@@ -212,8 +223,12 @@ public class RemoteRestoreService implements EXistRestoreService {
                     params.add(chunk);
                     params.add(len);
                     fileName = (String) remoteCallSite.execute("upload", params);
+
+                    restoreListener.transferred(len);
                 }
             }
+
+            restoreListener.finishedTransfer();
 
             return fileName;
         } catch (final IOException e) {
@@ -221,7 +236,8 @@ public class RemoteRestoreService implements EXistRestoreService {
         }
     }
 
-    private Path zipBackupDir(final Path dir) throws XMLDBException {
+    private Path zipBackupDir(final Path dir, final RestoreServiceTaskListener restoreListener) throws XMLDBException {
+        restoreListener.startedZipForTransfer(FileUtils.sizeQuietly(dir));
         try {
             final Path zipFile = Files.createTempFile("remote-restore-service", "zip");
             try (final OutputStream fos = Files.newOutputStream(zipFile);
@@ -230,13 +246,18 @@ public class RemoteRestoreService implements EXistRestoreService {
                     @Override
                     public FileVisitResult visitFile(final Path file, final BasicFileAttributes attrs) throws IOException {
                         final Path zipEntryPath = dir.relativize(file);
-                        zos.putNextEntry(new ZipEntry(zipEntryPath.toString()));
-                        Files.copy(file, zos);
+                        final String zipEntryName = withUnixSep(zipEntryPath.toString());
+                        zos.putNextEntry(new ZipEntry(zipEntryName));
+                        final long written = Files.copy(file, zos);
                         zos.closeEntry();
+
+                        restoreListener.addedFileToZipForTransfer(written);
+
                         return FileVisitResult.CONTINUE;
                     }
                 });
             }
+            restoreListener.finishedZipForTransfer();
             return zipFile;
         } catch (final IOException e) {
             throw new XMLDBException(ErrorCodes.VENDOR_ERROR, "Unable to zip backup dir: " + e.getMessage());
